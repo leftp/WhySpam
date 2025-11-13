@@ -124,7 +124,7 @@ Login with credentials from `basic_auth_user` and `basic_auth_password`.
 
 ### SpamAssassin Integration
 
-- Custom rulesets from kawaiipantsu and SwiftFilter
+- Custom rulesets from [kawaiipantsu](https://github.com/kawaiipantsu/spamassassin-rules) and [SwiftFilter](https://github.com/SwiftOnSecurity/SwiftFilter)
 - Maximum message size: 20MB (configurable)
 - Disabled safe sender rules to prevent whitelist benefits
 - Score recalculation excluding disabled rules
