@@ -1,0 +1,39 @@
+
+- name: Check if cert exists
+  ansible.builtin.stat:
+    path: "/etc/letsencrypt/live/{{ mail_domain }}/fullchain.pem"
+  register: cert_stat
+
+- name: Set have_cert fact
+  ansible.builtin.set_fact:
+    have_cert: "{{ cert_stat.stat.exists | default(false) }}"
+
+- name: Deploy site
+  ansible.builtin.template:
+    src: report.conf.j2
+    dest: /etc/nginx/sites-available/report.conf
+
+- name: Enable site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/report.conf
+    dest: /etc/nginx/sites-enabled/report.conf
+    state: link
+    force: true
+  notify: reload nginx
+
+- name: Disable default nginx site if present
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: reload nginx
+
+- name: Create htpasswd
+  ansible.builtin.command: htpasswd -bc /etc/nginx/.htpasswd "{{ basic_auth_user }}" "{{ basic_auth_password }}"
+  args: { creates: /etc/nginx/.htpasswd }
+  notify: reload nginx
+
+- name: Show basic auth credentials
+  ansible.builtin.debug:
+    msg: "Basic auth -> user: {{ basic_auth_user }}, password: {{ basic_auth_password }}"
+  when: (basic_auth_user | length > 0) and (basic_auth_password | length > 0)
+

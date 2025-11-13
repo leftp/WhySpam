@@ -1,0 +1,10 @@
+
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: restart spamassassin
+  ansible.builtin.service:
+    name: spamassassin
+    state: restarted
+    enabled: true

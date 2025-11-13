@@ -1,0 +1,44 @@
+
+- name: Wait for DNS A record to point to droplet
+  ansible.builtin.shell: |
+    getent hosts {{ mail_domain }} | awk '{print $1}' | head -n1
+  register: dns_check
+  changed_when: false
+  retries: 120
+  delay: 30
+  until: (dns_check.stdout | trim) == (droplet_ip | string)
+
+- name: Stop nginx before standalone challenge (if installed)
+  ansible.builtin.service:
+    name: nginx
+    state: stopped
+  failed_when: false
+  changed_when: false
+
+- name: Obtain/renew cert using standalone
+  ansible.builtin.command: >
+    certbot certonly --standalone -d {{ mail_domain }}
+                     --agree-tos
+                     {{ '--email ' + letsencrypt_email if letsencrypt_email else '--register-unsafely-without-email' }}
+                     --preferred-challenges http -n
+                     {{ '--staging' if (certbot_staging | default(false)) else '' }}
+  register: certbot_out
+  failed_when: false
+  changed_when: "'Congratulations!' in certbot_out.stdout"
+
+- name: Wait for cert files to exist
+  ansible.builtin.shell: |
+    test -f /etc/letsencrypt/live/{{ mail_domain }}/fullchain.pem \
+     -a -f /etc/letsencrypt/live/{{ mail_domain }}/privkey.pem
+  register: cert_files
+  retries: 40
+  delay: 3
+  until: cert_files.rc == 0
+  changed_when: false
+
+- name: Start nginx after issuance
+  ansible.builtin.service:
+    name: nginx
+    state: started
+  failed_when: false
+  changed_when: false

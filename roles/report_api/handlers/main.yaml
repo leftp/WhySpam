@@ -1,0 +1,10 @@
+
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: restart report-api
+  ansible.builtin.service:
+    name: report-api
+    state: restarted
+    enabled: true

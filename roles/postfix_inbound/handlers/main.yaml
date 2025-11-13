@@ -1,0 +1,13 @@
+
+- name: postmap recipient_access
+  ansible.builtin.command: postmap /etc/postfix/recipient_access
+  notify: restart postfix
+
+- name: postmap transport
+  ansible.builtin.command: postmap /etc/postfix/transport
+  notify: restart postfix
+
+- name: restart postfix
+  ansible.builtin.service:
+    name: postfix
+    state: restarted

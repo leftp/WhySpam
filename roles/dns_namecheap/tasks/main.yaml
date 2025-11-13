@@ -1,0 +1,41 @@
+
+- name: Get control node public IP (for Namecheap API ClientIp)
+  ansible.builtin.uri:
+    url: https://ifconfig.me/ip
+    return_content: true
+  register: ip_out
+
+- name: Determine target IP
+  ansible.builtin.set_fact:
+    target_ip: "{{ dns_target_ip | default(droplet_ip | default('')) }}"
+
+- name: Fail if target IP is unknown
+  ansible.builtin.assert:
+    that: target_ip | length > 0
+    fail_msg: "Target IP not found for DNS update."
+
+- name: Build Namecheap query string
+  ansible.builtin.set_fact:
+    nc_query: >-
+      ApiUser={{ nc_username | urlencode }}&
+      ApiKey={{ nc_api_key | urlencode }}&
+      UserName={{ nc_username | urlencode }}&
+      ClientIp={{ (ip_out.content | trim) | urlencode }}&
+      Command=namecheap.domains.dns.setHosts&
+      SLD={{ (mail_domain.split('.')[0]) | urlencode }}&
+      TLD={{ (mail_domain.split('.', 1)[1]) | urlencode }}&
+      HostName1=%40&RecordType1=A&Address1={{ target_ip | urlencode }}&TTL1=300&
+      HostName2=mail&RecordType2=A&Address2={{ target_ip | urlencode }}&TTL2=300&
+      HostName3=%40&RecordType3=MX&Address3={{ ('mail.' + mail_domain) | urlencode }}&MXPref3=10&TTL3=300&
+      HostName4=%40&RecordType4=TXT&Address4={{ 'v=spf1 mx ~all' | urlencode }}&TTL4=300
+
+- name: Set Namecheap DNS
+  ansible.builtin.uri:
+    url: "{{ ('https://api.namecheap.com/xml.response?' ~ nc_query) | regex_replace('\\s+', '') }}"
+    method: GET
+    return_content: true
+  register: nc_resp
+
+- name: Show Namecheap response
+  ansible.builtin.debug:
+    var: nc_resp.content

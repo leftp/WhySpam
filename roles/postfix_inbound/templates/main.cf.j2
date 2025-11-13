@@ -1,0 +1,17 @@
+# Use IPv4 only (server doesn't have IPv6 connectivity)
+inet_protocols = ipv4
+
+myhostname = mail.{{ mail_domain }}
+mydomain = {{ mail_domain }}
+# Include the domain in mydestination to accept emails for the domain
+mydestination = $myhostname, localhost.$mydomain, localhost, $mydomain
+# Allow recipients in recipient_access file, then reject unauthorized destinations
+# check_recipient_access with OK will permit and stop processing
+# This allows external senders (like Gmail) if recipient is in recipient_access with OK
+smtpd_relay_restrictions = permit_mynetworks, check_recipient_access hash:/etc/postfix/recipient_access, reject_unauth_destination
+smtpd_recipient_restrictions = permit_mynetworks, check_recipient_access hash:/etc/postfix/recipient_access, reject_unauth_destination
+transport_maps = hash:/etc/postfix/transport
+home_mailbox = Maildir/
+# Allow any recipient in mydestination (we control access via recipient_access file)
+local_recipient_maps =
+local_transport = mailproc:

@@ -1,0 +1,60 @@
+
+- name: Deploy main.cf
+  ansible.builtin.template:
+    src: main.cf.j2
+    dest: /etc/postfix/main.cf
+  notify: restart postfix
+
+- name: Build recipient_access
+  ansible.builtin.copy:
+    dest: /etc/postfix/recipient_access
+    content: |
+      {% for r in allowed_recipients %}{{ r }}    OK
+      {% endfor %}
+      {{ mail_domain }}    REJECT
+  notify: postmap recipient_access
+
+- name: Ensure recipient_access.db exists
+  ansible.builtin.command: postmap /etc/postfix/recipient_access
+  args:
+      creates: /etc/postfix/recipient_access.db
+  notify: restart postfix
+
+- name: Configure pipe transport in master.cf
+  ansible.builtin.blockinfile:
+    path: /etc/postfix/master.cf
+    marker: "# {mark} ANSIBLE mailproc pipe"
+    block: |
+      mailproc   unix  -       n       n       -       -       pipe
+        flags=Rq user=mailproc argv=/usr/local/bin/score_and_store_wrapper.sh
+  notify: restart postfix
+
+- name: Build transport map for allowed recipients
+  ansible.builtin.copy:
+    dest: /etc/postfix/transport
+    content: |
+      {% for r in allowed_recipients %}{{ r }}    mailproc:
+      {% endfor %}
+  notify: postmap transport
+
+- name: Ensure transport.db exists
+  ansible.builtin.command: postmap /etc/postfix/transport
+  args:
+    creates: /etc/postfix/transport.db
+  notify: restart postfix
+
+- name: Create mailproc pipe log file
+  ansible.builtin.file:
+    path: /var/log/score_and_store.err
+    state: touch
+    owner: mailproc
+    group: mailproc
+    mode: "0644"
+
+- name: Install score_and_store wrapper
+  ansible.builtin.copy:
+    dest: /usr/local/bin/score_and_store_wrapper.sh
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      exec /usr/bin/python3 /usr/local/bin/score_and_store.py 2>>/var/log/score_and_store.err

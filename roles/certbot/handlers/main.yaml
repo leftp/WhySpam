@@ -1,0 +1,6 @@
+
+- name: reload nginx
+  ansible.builtin.shell: nginx -t && systemctl reload nginx
+  when:
+    - ("/etc/letsencrypt/live/" ~ mail_domain ~ "/fullchain.pem") is file
+    - ("/etc/letsencrypt/live/" ~ mail_domain ~ "/privkey.pem") is file

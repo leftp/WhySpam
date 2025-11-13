@@ -1,0 +1,71 @@
+
+- name: Install scorer script
+  ansible.builtin.copy:
+    src: files/score_and_store.py
+    dest: /usr/local/bin/score_and_store.py
+    mode: "0755"
+
+- name: Ensure mailproc user exists
+  ansible.builtin.user:
+    name: mailproc
+    shell: /usr/sbin/nologin
+    create_home: true
+
+- name: Create archive dirs
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: mailproc
+    group: mailproc
+    mode: "0755"
+  loop:
+    - /var/mail-archive
+    - /var/mail-archive/json
+    - /var/mail-archive/raw
+    - /var/mail-archive/screenshots
+    - /var/mail-archive/attachments
+
+- name: Allow www-data to read and write archive (ACL)
+  ansible.posix.acl:
+    path: /var/mail-archive
+    entity: www-data
+    etype: user
+    permissions: rwX
+    recursive: true
+    state: present
+
+- name: Default ACLs for new files/dirs (read and write)
+  ansible.posix.acl:
+    path: "{{ item }}"
+    entity: www-data
+    etype: user
+    permissions: rwX
+    default: true
+    state: present
+  loop:
+    - /var/mail-archive
+    - /var/mail-archive/json
+    - /var/mail-archive/raw
+    - /var/mail-archive/screenshots
+    - /var/mail-archive/attachments
+
+- name: Ensure ACL mask allows read/write/execute (recursive)
+  ansible.posix.acl:
+    path: /var/mail-archive
+    etype: mask
+    permissions: rwX
+    recursive: true
+    state: present
+
+- name: Ensure default ACL mask allows read/write/execute on new entries
+  ansible.posix.acl:
+    path: /var/mail-archive
+    etype: mask
+    permissions: rwX
+    default: true
+    state: present
+
+- name: Normalize permissions on existing JSON files
+  ansible.builtin.shell: |
+    find /var/mail-archive/json -type f -name '*.json' -exec chmod 0644 {} +
+  args: {}

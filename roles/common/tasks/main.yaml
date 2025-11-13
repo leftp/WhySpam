@@ -1,0 +1,79 @@
+
+- name: Force apt to HTTPS; clean & update
+  ansible.builtin.shell: |
+    sed -i 's|http://archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list || true
+    sed -i 's|http://security.ubuntu.com/ubuntu|https://security.ubuntu.com/ubuntu|g' /etc/apt/sources.list || true
+    find /etc/apt/ -name "*.list" -type f -exec sed -i 's|http://|https://|g' {} +
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+    apt-get update
+  changed_when: true
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - git
+      - acl
+      - nginx
+      - postfix
+      - spamassassin
+      - spamc
+      - python3-venv
+      - python3-pip
+      - apache2-utils
+      - certbot
+      - python3-certbot-nginx
+      - fail2ban
+    state: present
+    update_cache: true
+
+- name: Install Playwright Chromium dependencies
+  ansible.builtin.apt:
+    name:
+      - libatk1.0-0t64
+      - libatk-bridge2.0-0t64
+      - libatspi2.0-0t64
+      - libxcomposite1
+      - libxdamage1
+      - libxfixes3
+      - libxrandr2
+      - libgbm1
+      - libasound2t64
+    state: present
+
+- name: Install Playwright via pip
+  ansible.builtin.pip:
+    name: playwright
+    state: present
+    executable: pip3
+    extra_args: --break-system-packages
+
+- name: Install Playwright Chromium browser (system-wide)
+  ansible.builtin.command: python3 -m playwright install chromium
+  args:
+    creates: /root/.cache/ms-playwright
+  become_user: root
+  ignore_errors: true
+
+- name: Install Playwright Chromium browser (for mailproc user)
+  ansible.builtin.command: python3 -m playwright install chromium
+  args:
+    creates: /home/mailproc/.cache/ms-playwright
+  become_user: mailproc
+  ignore_errors: true
+
+- name: Configure fail2ban for nginx http auth
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.d/nginx-http-auth.local
+    mode: "0644"
+    content: |
+      [nginx-http-auth]
+      enabled = true
+      filter  = nginx-http-auth
+      port    = http,https
+      logpath = /var/log/nginx/*error.log
+      maxretry = 5
+      findtime = 10m
+      bantime  = 1h
+  notify: restart fail2ban

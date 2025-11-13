@@ -1,0 +1,29 @@
+
+# ===== Domain & recipients =====
+mail_domain: example.com
+allowed_recipients:
+  - tests@example.com
+
+# ===== Web basic auth =====
+basic_auth_user: admin
+basic_auth_password: "change-me"  
+letsencrypt_email: ""  # or set a real email
+certbot_staging: true   # set to false to use production Let's Encrypt
+
+# ===== Namecheap (ClientIp must be whitelisted) =====
+nc_username: your_namecheap_username
+nc_api_key:  your_namecheap_api_key_here
+
+# ===== DigitalOcean provisioning =====
+do_token: your_digitalocean_api_token_here
+do_region: nyc1
+do_size: s-1vcpu-1gb
+do_image: ubuntu-24-04-x64
+do_ssh_key_name: your_ssh_key_name
+ssh_private_key_path: /path/to/your/.ssh/id_rsa
+
+# ===== Admin access control =====
+# Optionally restrict SSH ingress to these CIDRs (used by firewall rule for port 22)
+admin_source_cidrs:
+  - "0.0.0.0/0"
+  - "::/0"

@@ -1,0 +1,76 @@
+
+- name: Clone rulesets
+  ansible.builtin.git:
+    repo: "{{ item.repo }}"
+    dest: "{{ item.dest }}"
+    version: HEAD
+  loop:
+    - { repo: "https://github.com/kawaiipantsu/spamassassin-rules.git", dest: "/opt/sa-rules/kawaiipantsu" }
+    - { repo: "https://github.com/SwiftOnSecurity/SwiftFilter.git",     dest: "/opt/sa-rules/swiftfilter" }
+
+- name: Install spamd systemd unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/spamassassin.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=SpamAssassin daemon (spamd)
+      After=network.target nss-lookup.target
+      Documentation=man:spamd(1)
+      [Service]
+      Type=simple
+      User=debian-spamd
+      Group=debian-spamd
+      ExecStart=/usr/sbin/spamd -c -m5 -x -i 127.0.0.1 -p 783 -C /opt/sa-rules/kawaiipantsu -C /opt/sa-rules/swiftfilter
+      Restart=always
+      RestartSec=2s
+      # Allow binding to privileged port 783 (< 1024)
+      AmbientCapabilities=CAP_NET_BIND_SERVICE
+      CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+      NoNewPrivileges=false
+      ProtectSystem=strict
+      ProtectHome=true
+      PrivateTmp=true
+      [Install]
+      WantedBy=multi-user.target
+  notify: [reload systemd, restart spamassassin]
+
+- name: Configure SpamAssassin local.cf to disable safe sender rules
+  ansible.builtin.copy:
+    dest: /etc/spamassassin/local.cf
+    mode: "0644"
+    content: |
+      # Disable safe sender/whitelist rules globally
+      # These rules reduce spam scores based on sender IP/domain reputation
+      # Setting scores to 0 effectively disables them
+      
+      score WHITELIST_DOMAIN 0
+      score WHITELIST_FROM 0
+      score TRUSTED_RELAY 0
+      score WHITELIST_RELAY 0
+      score WHITELIST_FROM_DOMAIN 0
+      score WHITELIST_TO_DOMAIN 0
+      score TRUSTED_FROM_DOMAIN 0
+      score RCVD_IN_VALIDITY_SAFE 0
+      score RCVD_IN_VALIDITY_CERTIFIED 0
+  notify: restart spamassassin
+
+- name: Create disable-validity.cf to block DNSBL queries for safe sender RBLs
+  ansible.builtin.copy:
+    dest: /etc/spamassassin/disable-validity.cf
+    mode: "0644"
+    content: |
+      # Disable DNSBL queries for Validity and other safe sender RBLs
+      # This prevents RCVD_IN_VALIDITY_SAFE and RCVD_IN_VALIDITY_CERTIFIED rules from triggering
+      dns_query_restriction deny sa-trusted.bondedsender.org
+      dns_query_restriction deny sa-accredit.habeas.com
+      dns_query_restriction deny bl.score.senderscore.com
+      dns_query_restriction deny multi.uribl.com
+      dns_query_restriction deny list.dnswl.org
+  notify: restart spamassassin
+
+- name: Ensure spamassassin running
+  ansible.builtin.service:
+    name: spamassassin
+    state: started
+    enabled: true

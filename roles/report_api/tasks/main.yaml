@@ -1,0 +1,37 @@
+
+- name: Create venv
+  ansible.builtin.command: python3 -m venv /opt/report/venv
+  args: { creates: /opt/report/venv/bin/python }
+
+- name: Install python deps
+  ansible.builtin.shell: |
+    /opt/report/venv/bin/pip install --upgrade pip
+    /opt/report/venv/bin/pip install fastapi "uvicorn[standard]"
+  args: { creates: /opt/report/venv/bin/uvicorn }
+
+- name: Install API app
+  ansible.builtin.copy:
+    src: files/report_api.py
+    dest: /opt/report/report_api.py
+    mode: "0644"
+
+- name: Systemd unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/report-api.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Mail Report API (FastAPI + Uvicorn)
+      After=network.target
+      [Service]
+      User=www-data
+      Group=www-data
+      WorkingDirectory=/opt/report
+      Environment=PYTHONUNBUFFERED=1
+      ExecStart=/opt/report/venv/bin/uvicorn report_api:app --host 127.0.0.1 --port 8080
+      Restart=on-failure
+      [Install]
+      WantedBy=multi-user.target
+  notify:
+    - reload systemd
+    - restart report-api

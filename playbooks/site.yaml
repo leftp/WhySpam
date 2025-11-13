@@ -1,0 +1,227 @@
+---
+# Play 1: Provision DigitalOcean resources from localhost
+- name: Provision DigitalOcean droplet + firewall (local)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../group_vars/all.yaml
+
+  vars:
+    droplet_name: "mail-{{ mail_domain | replace('.', '-') }}"
+    fw_name: "inbound-mail-fw-{{ mail_domain | replace('.', '-') }}"
+    fw_in_rules:
+      - protocol: tcp
+        ports: "22"
+        sources:
+          addresses: "{{ admin_source_cidrs }}"
+      - protocol: tcp
+        ports: "25"
+        sources:
+          addresses: ["0.0.0.0/0", "::/0"]
+      - protocol: tcp
+        ports: "80"
+        sources:
+          addresses: ["0.0.0.0/0", "::/0"]
+      - protocol: tcp
+        ports: "443"
+        sources:
+          addresses: ["0.0.0.0/0", "::/0"]
+    fw_out_rules:
+      - protocol: tcp
+        ports: "53"
+        destinations:
+          addresses: ["0.0.0.0/0", "::/0"]
+      - protocol: udp
+        ports: "53"
+        destinations:
+          addresses: ["0.0.0.0/0", "::/0"]
+      - protocol: udp
+        ports: "123"
+        destinations:
+          addresses: ["0.0.0.0/0", "::/0"]
+      - protocol: tcp
+        ports: "80"
+        destinations:
+          addresses: ["0.0.0.0/0", "::/0"]
+      - protocol: tcp
+        ports: "443"
+        destinations:
+          addresses: ["0.0.0.0/0", "::/0"]
+
+  tasks:
+    - name: Check required vars for DO
+      ansible.builtin.assert:
+        that:
+          - do_token | length > 0
+          - do_region | length > 0
+          - do_size | length > 0
+          - do_image | length > 0
+          - do_ssh_key_name | length > 0
+          - ssh_private_key_path | length > 0
+          - mail_domain | length > 0
+        fail_msg: "Missing one or more required DO / SSH / domain vars."
+
+    - name: Lookup DO SSH key by name
+      community.digitalocean.digital_ocean_sshkey_info:
+        oauth_token: "{{ do_token }}"
+      register: do_keys
+
+    - name: Set ssh_key_id fact
+      ansible.builtin.set_fact:
+        ssh_key_id: >-
+          {{ (do_keys.data | selectattr('name', 'equalto', do_ssh_key_name) | list | first).id
+             | default('', true) }}
+
+    - name: Fail if SSH key not found
+      ansible.builtin.assert:
+        that:
+          - (ssh_key_id | int(0)) > 0
+        fail_msg: "Could not find DigitalOcean SSH key named {{ do_ssh_key_name }}."
+
+    - name: Create Cloud Firewall (idempotent)
+      community.digitalocean.digital_ocean_firewall:
+        oauth_token: "{{ do_token }}"
+        state: present
+        name: "{{ fw_name }}"
+        inbound_rules: "{{ fw_in_rules }}"
+        outbound_rules: "{{ fw_out_rules }}"
+      register: fw_create
+
+    - name: Create droplet (idempotent by name)
+      community.digitalocean.digital_ocean_droplet:
+        oauth_token: "{{ do_token }}"
+        state: present
+        unique_name: true
+        name: "{{ droplet_name }}"
+        region: "{{ do_region }}"
+        size: "{{ do_size }}"
+        image: "{{ do_image }}"
+        ipv6: false
+        ssh_keys:
+          - "{{ ssh_key_id }}"
+        tags:
+          - mail-evaluator
+      register: droplet_out
+
+    - name: Save droplet id and ip
+      ansible.builtin.set_fact:
+        droplet_id: "{{ droplet_out.data.droplet.id }}"
+        droplet_ip: >-
+          {{
+            (droplet_out.data.droplet.networks.v4
+             | selectattr('type','equalto','public') | list | first).ip_address
+          }}
+
+    - name: Wait for SSH to be up on the droplet
+      ansible.builtin.wait_for:
+        host: "{{ droplet_ip }}"
+        port: 22
+        timeout: 600
+        sleep: 5
+        state: started
+
+    # Re-list firewalls and attach the droplet safely (no 'id' param usage).
+    - name: Read firewall list (for attach step)
+      community.digitalocean.digital_ocean_firewall_info:
+        oauth_token: "{{ do_token }}"
+      register: fw_info_attach
+
+    - name: Locate firewall object by exact name
+      ansible.builtin.set_fact:
+        fw_attach_obj: >-
+          {{
+            (fw_info_attach.data | selectattr('name','equalto', fw_name) | list | first)
+            | default(None, true)
+          }}
+
+    - name: Ensure we found the firewall object before attaching
+      ansible.builtin.assert:
+        that:
+          - fw_attach_obj is defined
+          - fw_attach_obj != None
+        fail_msg: "Could not resolve firewall by name {{ fw_name }} (eventual consistency?)."
+
+    - name: Compute current droplet_ids for firewall
+      ansible.builtin.set_fact:
+        fw_current_droplets: "{{ fw_attach_obj.droplet_ids | default([]) }}"
+
+    - name: Compute desired droplet_ids for firewall
+      ansible.builtin.set_fact:
+        fw_desired_droplets: "{{ (fw_current_droplets + [droplet_id]) | unique }}"
+
+    - name: Ensure droplet is attached to firewall (by name; idempotent)
+      community.digitalocean.digital_ocean_firewall:
+        oauth_token: "{{ do_token }}"
+        state: present
+        name: "{{ fw_name }}"
+        droplet_ids: "{{ fw_desired_droplets }}"
+        inbound_rules: "{{ fw_in_rules }}"
+        outbound_rules: "{{ fw_out_rules }}"
+
+    - name: Update Namecheap DNS for {{ mail_domain }} (A, MX, SPF)
+      ansible.builtin.include_role:
+        name: dns_namecheap
+      vars:
+        dns_target_ip: "{{ droplet_ip }}"
+
+    - name: Add droplet to in-memory inventory as group 'mailhost'
+      ansible.builtin.add_host:
+        name: "{{ droplet_ip }}"
+        groups: mailhost
+        ansible_user: root
+        ansible_ssh_private_key_file: "{{ ssh_private_key_path }}"
+        droplet_ip: "{{ droplet_ip }}"
+        ansible_python_interpreter: /usr/bin/python3
+
+# Play 2: Configure the droplet using your roles
+- name: Configure inbound mail scorer/report host
+  hosts: mailhost
+  become: true
+  gather_facts: true
+  gather_timeout: 30
+
+  vars_files:
+    - ../group_vars/all.yaml
+
+  roles:
+    - role: common
+    - role: spamassassin
+    - role: scorer
+    - role: report_api
+    - role: certbot
+    - role: nginx_site
+    - role: postfix_inbound
+
+  tasks:
+    - name: Check if SSL certificate exists
+      ansible.builtin.stat:
+        path: "/etc/letsencrypt/live/{{ mail_domain }}/fullchain.pem"
+      register: cert_check
+
+    - name: Display deployment summary
+      ansible.builtin.debug:
+        msg:
+          - ""
+          - "================================================================================"
+          - "DEPLOYMENT COMPLETE!"
+          - "================================================================================"
+          - ""
+          - "Web Interface:"
+          - "  URL: {% if cert_check.stat.exists %}https{% else %}http{% endif %}://{{ mail_domain }}/report"
+          - "  {% if cert_check.stat.exists and (certbot_staging | default(false)) %}(Note: Using Let's Encrypt STAGING certificate - browser will show security warning){% endif %}"
+          - ""
+          - "Login Credentials:"
+          - "  Username: {{ basic_auth_user }}"
+          - "  Password: {{ basic_auth_password }}"
+          - ""
+          - "Send a test email:"
+          - "  swaks --to {{ allowed_recipients[0] }} \\"
+          - "        --from test@example.com \\"
+          - "        --server {{ mail_domain }} \\"
+          - "        --port 25 \\"
+          - "        --header \"Subject: Test Email\" \\"
+          - "        --body \"This is a test email to check spam scoring\""
+          - ""
+          - "================================================================================"
