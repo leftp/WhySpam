@@ -1,6 +1,6 @@
 # WhySpam - Mail Server with SpamAssassin Analysis
 
-An Ansible solution that will deploying a Postfix mail server on DigitalOcean to receive emails, analyze them with multiple SpamAssassin rules, and provides a web interface to view spam scoring reports.
+An Ansible solution that will deploy a Postfix mail server on DigitalOcean to receive emails, analyze them with multiple SpamAssassin rules, and provides a web interface to view spam scoring reports.
 
 <img width="1479" height="1197" alt="{F55EED7F-6088-4883-A835-065BDC537224}" src="https://github.com/user-attachments/assets/732685ff-7331-4a6b-9fa2-70cf2142c5c8" />
 
